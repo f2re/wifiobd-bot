@@ -5,11 +5,14 @@ from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.keyboards.inline import main_menu_keyboard
+from app.keyboards.inline import main_menu_keyboard, cart_keyboard, back_to_main_menu_keyboard
 from app.services.user import user_service
+from app.services.cart import cart_service
 from app.utils.logger import get_logger
+from app.utils.formatting import format_cart_summary
 
 logger = get_logger(__name__)
 
@@ -87,11 +90,29 @@ async def callback_start(callback: CallbackQuery, db: AsyncSession, state: FSMCo
 Выберите раздел:
 """
 
-        await callback.message.edit_text(
-            welcome_text,
-            reply_markup=main_menu_keyboard(),
-            parse_mode="HTML"
-        )
+        # Check if current message has photo
+        has_photo = callback.message.photo is not None and len(callback.message.photo) > 0
+
+        if has_photo:
+            # Delete photo message and send text
+            await callback.message.delete()
+            await callback.message.answer(
+                welcome_text,
+                reply_markup=main_menu_keyboard(),
+                parse_mode="HTML"
+            )
+        else:
+            try:
+                await callback.message.edit_text(
+                    welcome_text,
+                    reply_markup=main_menu_keyboard(),
+                    parse_mode="HTML"
+                )
+            except TelegramBadRequest as e:
+                if "message is not modified" in str(e):
+                    pass
+                else:
+                    raise
 
         await callback.answer()
 
@@ -108,6 +129,7 @@ async def cmd_help(message: Message):
 
 <b>Команды:</b>
 /start - Главное меню
+/cart - Открыть корзину
 /help - Эта справка
 /admin - Админ-панель (только для администраторов)
 
@@ -132,6 +154,36 @@ async def cmd_help(message: Message):
         reply_markup=main_menu_keyboard(),
         parse_mode="HTML"
     )
+
+
+@router.message(Command("cart"))
+async def cmd_cart(message: Message):
+    """Handle /cart command - quick access to shopping cart"""
+    try:
+        user_id = message.from_user.id
+
+        # Get cart
+        cart = await cart_service.get_cart(user_id)
+
+        if not cart["items"]:
+            text = "🛒 <b>Ваша корзина пуста</b>\n\nДобавьте товары из каталога."
+            keyboard = back_to_main_menu_keyboard()
+        else:
+            text = format_cart_summary(cart)
+            keyboard = cart_keyboard(has_items=True)
+
+        await message.answer(
+            text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        logger.error(f"Error in /cart command: {e}")
+        await message.answer(
+            "Произошла ошибка при загрузке корзины",
+            reply_markup=main_menu_keyboard()
+        )
 
 
 @router.callback_query(F.data == "noop")
