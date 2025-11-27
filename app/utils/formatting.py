@@ -119,14 +119,35 @@ def escape_markdown(text: str) -> str:
 
 def format_product_card(product, description_length: int = 300) -> str:
     """Format product details card"""
-    desc = product.description or "Описание отсутствует"
-    if len(desc) > description_length:
-        desc = desc[:description_length] + "..."
+    # Handle both dict and object access
+    if isinstance(product, dict):
+        desc = product.get('description') or "Описание отсутствует"
+        if len(desc) > description_length:
+            desc = desc[:description_length] + "..."
 
-    stock_text = "В наличии" if product.quantity > 0 else "Нет в наличии"
-    stock_emoji = "✅" if product.quantity > 0 else "❌"
+        quantity = product.get('quantity', 0)
+        stock_text = "В наличии" if quantity > 0 else "Нет в наличии"
+        stock_emoji = "✅" if quantity > 0 else "❌"
 
-    return f"""
+        return f"""
+<b>{product.get('name', 'Без названия')}</b>
+
+{desc}
+
+💰 <b>Цена:</b> {format_price(product.get('price', 0))}
+📦 <b>Наличие:</b> {stock_emoji} {stock_text}
+🏷 <b>Артикул:</b> {product.get('model', 'Н/Д')}
+"""
+    else:
+        # Object attribute access (fallback for compatibility)
+        desc = product.description or "Описание отсутствует"
+        if len(desc) > description_length:
+            desc = desc[:description_length] + "..."
+
+        stock_text = "В наличии" if product.quantity > 0 else "Нет в наличии"
+        stock_emoji = "✅" if product.quantity > 0 else "❌"
+
+        return f"""
 <b>{product.name}</b>
 
 {desc}

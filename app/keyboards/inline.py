@@ -63,7 +63,8 @@ def products_keyboard(
     products: List[Dict[str, Any]],
     category_id: int,
     page: int = 0,
-    has_next: bool = False
+    has_next: bool = False,
+    parent_id: int = 0
 ) -> InlineKeyboardMarkup:
     """
     Keyboard for displaying products with pagination
@@ -73,6 +74,7 @@ def products_keyboard(
         category_id: Category ID
         page: Current page
         has_next: Whether there's a next page
+        parent_id: Parent category ID for back button
     """
     builder = InlineKeyboardBuilder()
 
@@ -107,11 +109,17 @@ def products_keyboard(
     if pagination_buttons:
         builder.row(*pagination_buttons)
 
-    # Back button
-    builder.row(InlineKeyboardButton(
-        text="🔙 Назад к категориям",
-        callback_data=f"cat:{category_id}"
-    ))
+    # Back button - navigate to parent category or catalog root
+    if parent_id > 0:
+        builder.row(InlineKeyboardButton(
+            text="🔙 Назад к категориям",
+            callback_data=f"cat:{parent_id}"
+        ))
+    else:
+        builder.row(InlineKeyboardButton(
+            text="🔙 Назад к категориям",
+            callback_data="catalog"
+        ))
 
     return builder.as_markup()
 
