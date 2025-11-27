@@ -3,6 +3,7 @@ Shopping cart handlers
 """
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
+from aiogram.exceptions import TelegramBadRequest
 
 from app.services.cart import cart_service
 from app.services.opencart import opencart_service
@@ -67,11 +68,29 @@ async def show_cart(callback: CallbackQuery):
             text = format_cart_summary(cart)
             keyboard = cart_keyboard(has_items=True)
 
-        await callback.message.edit_text(
-            text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
+        # Check if current message has photo
+        has_photo = callback.message.photo is not None and len(callback.message.photo) > 0
+
+        if has_photo:
+            # Delete photo message and send text
+            await callback.message.delete()
+            await callback.message.answer(
+                text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        else:
+            try:
+                await callback.message.edit_text(
+                    text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+            except TelegramBadRequest as e:
+                if "message is not modified" in str(e):
+                    pass
+                else:
+                    raise
 
         await callback.answer()
 
