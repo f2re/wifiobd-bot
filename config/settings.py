@@ -15,10 +15,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [int(id.strip()) for id in os.getenv("ADMIN_IDS", "").split(",") if id.strip()]
 
-# OpenCart API
+# OpenCart Configuration
 OPENCART_URL = os.getenv("OPENCART_URL", "https://wifiobd.ru")
-OPENCART_API_URL = os.getenv("OPENCART_API_URL", f"{OPENCART_URL}/index.php?route=api")
-OPENCART_API_TOKEN = os.getenv("OPENCART_API_TOKEN", "")
+
+# OpenCart API (Version 3.0.2.0)
+# You need to create an API user in OpenCart admin panel:
+# System -> Users -> API -> Add New
+# Then get the Username and Key (not token!)
 OPENCART_API_USERNAME = os.getenv("OPENCART_API_USERNAME", "")
 OPENCART_API_KEY = os.getenv("OPENCART_API_KEY", "")
 
