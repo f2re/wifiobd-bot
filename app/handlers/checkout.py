@@ -2,8 +2,10 @@
 Checkout and order creation handlers
 """
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.states.checkout import CheckoutStates
@@ -25,7 +27,7 @@ router = Router()
 
 @router.callback_query(F.data == "checkout")
 async def start_checkout(callback: CallbackQuery, state: FSMContext, db: AsyncSession):
-    """Start checkout process"""
+    """Start checkout process - auto-fill and confirm"""
     try:
         user_id = callback.from_user.id
 
@@ -36,33 +38,41 @@ async def start_checkout(callback: CallbackQuery, state: FSMContext, db: AsyncSe
             await callback.answer("🛒 Корзина пуста", show_alert=True)
             return
 
-        # Get user info
+        # Get user info from database
         user = await user_service.get_user(db, user_id)
 
-        # Start FSM
-        await state.set_state(CheckoutStates.waiting_name)
+        # Auto-fill data from Telegram
+        telegram_user = callback.from_user
 
-        # Pre-fill name if available
-        default_name = user.first_name if user else callback.from_user.first_name
+        # Name: first_name + last_name or just first_name
+        full_name = telegram_user.first_name
+        if telegram_user.last_name:
+            full_name += f" {telegram_user.last_name}"
 
-        text = f"""
-📝 <b>Оформление заказа</b>
+        # Phone from database if available
+        phone = user.phone if user and user.phone else None
 
-Сумма к оплате: <b>{format_price(cart['total'])}</b>
+        # Email from database or generate from username
+        email = None
+        if user and user.email:
+            email = user.email
+        elif telegram_user.username:
+            email = f"{telegram_user.username}@telegram.user"
 
-<b>Шаг 1/4:</b> Введите ваше имя
-
-Имя по умолчанию: {default_name}
-"""
-
-        await callback.message.edit_text(
-            text,
-            reply_markup=skip_keyboard("skip_name"),
-            parse_mode="HTML"
+        # Store data in state
+        await state.update_data(
+            name=full_name,
+            phone=phone,
+            email=email,
+            address="Самовывоз",
+            needs_phone=phone is None  # Flag if we need to ask for phone
         )
 
-        # Store default name in state
-        await state.update_data(default_name=default_name)
+        # If no phone - ask for it, otherwise go straight to confirmation
+        if phone is None:
+            await ask_for_phone(callback.message, state, cart['total'])
+        else:
+            await show_order_confirmation(callback.message, state, is_callback=True)
 
         await callback.answer()
 
@@ -71,53 +81,93 @@ async def start_checkout(callback: CallbackQuery, state: FSMContext, db: AsyncSe
         await callback.answer("Произошла ошибка", show_alert=True)
 
 
-@router.callback_query(F.data == "skip_name", CheckoutStates.waiting_name)
-async def skip_name(callback: CallbackQuery, state: FSMContext):
-    """Skip name input, use default"""
-    data = await state.get_data()
-    default_name = data.get("default_name", callback.from_user.first_name)
-
-    await state.update_data(name=default_name)
+async def ask_for_phone(message: Message, state: FSMContext, total: float):
+    """Ask user to share phone contact"""
     await state.set_state(CheckoutStates.waiting_phone)
 
-    text = """
+    # Create keyboard with contact sharing button
+    contact_keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📱 Поделиться контактом", request_contact=True)],
+            [KeyboardButton(text="✏️ Ввести номер вручную")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+    text = f"""
 📝 <b>Оформление заказа</b>
 
-<b>Шаг 2/4:</b> Введите ваш номер телефона
+Сумма к оплате: <b>{format_price(total)}</b>
 
-Формат: +7XXXXXXXXXX или 8XXXXXXXXXX
+📞 <b>Укажите номер телефона</b>
+
+Нажмите "📱 Поделиться контактом" для автоматической отправки вашего номера, или выберите "✏️ Ввести номер вручную".
 """
 
-    await callback.message.edit_text(text, parse_mode="HTML")
-    await callback.answer()
+    if hasattr(message, 'edit_text'):
+        # Callback message - delete and send new
+        try:
+            await message.delete()
+        except:
+            pass
+
+    await message.answer(
+        text,
+        reply_markup=contact_keyboard,
+        parse_mode="HTML"
+    )
 
 
-@router.message(CheckoutStates.waiting_name)
-async def process_name(message: Message, state: FSMContext):
-    """Process customer name"""
-    name = message.text.strip()
+@router.message(CheckoutStates.waiting_phone, F.contact)
+async def process_contact(message: Message, state: FSMContext, db: AsyncSession):
+    """Process shared contact"""
+    contact = message.contact
 
-    if len(name) < 2:
-        await message.answer("❌ Имя слишком короткое. Пожалуйста, введите корректное имя.")
+    # Verify it's the user's own contact
+    if contact.user_id != message.from_user.id:
+        await message.answer(
+            "❌ Пожалуйста, поделитесь своим контактом, а не контактом другого пользователя.",
+            reply_markup=ReplyKeyboardRemove()
+        )
         return
 
-    await state.update_data(name=name)
-    await state.set_state(CheckoutStates.waiting_phone)
+    phone = contact.phone_number
 
-    text = """
-📝 <b>Оформление заказа</b>
+    # Ensure phone starts with +
+    if not phone.startswith('+'):
+        phone = f"+{phone}"
 
-<b>Шаг 2/4:</b> Введите ваш номер телефона
+    await state.update_data(phone=phone, needs_phone=False)
 
-Формат: +7XXXXXXXXXX или 8XXXXXXXXXX
-"""
+    # Save phone to user profile
+    await user_service.update_phone(db, message.from_user.id, phone)
 
-    await message.answer(text, parse_mode="HTML")
+    # Remove keyboard
+    await message.answer(
+        "✅ Номер телефона сохранен!",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+    # Show confirmation
+    await show_order_confirmation(message, state, is_callback=False)
 
 
-@router.message(CheckoutStates.waiting_phone)
-async def process_phone(message: Message, state: FSMContext, db: AsyncSession):
-    """Process customer phone"""
+@router.message(CheckoutStates.waiting_phone, F.text == "✏️ Ввести номер вручную")
+async def ask_manual_phone(message: Message, state: FSMContext):
+    """Ask for manual phone input"""
+    await state.set_state(CheckoutStates.waiting_phone_manual)
+
+    await message.answer(
+        "📝 Введите номер телефона в формате:\n+7XXXXXXXXXX или 8XXXXXXXXXX",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="HTML"
+    )
+
+
+@router.message(CheckoutStates.waiting_phone_manual)
+async def process_phone_manual(message: Message, state: FSMContext, db: AsyncSession):
+    """Process manually entered phone"""
     phone = message.text.strip()
 
     # Simple phone validation
@@ -127,105 +177,25 @@ async def process_phone(message: Message, state: FSMContext, db: AsyncSession):
         await message.answer("❌ Неверный формат телефона. Пожалуйста, введите корректный номер.")
         return
 
-    await state.update_data(phone=phone)
+    # Format phone
+    if phone.startswith('8'):
+        phone = f"+7{phone_digits[1:]}"
+    elif not phone.startswith('+'):
+        phone = f"+{phone_digits}"
+
+    await state.update_data(phone=phone, needs_phone=False)
 
     # Save phone to user profile
     await user_service.update_phone(db, message.from_user.id, phone)
 
-    await state.set_state(CheckoutStates.waiting_email)
+    await message.answer("✅ Номер телефона сохранен!")
 
-    text = """
-📝 <b>Оформление заказа</b>
-
-<b>Шаг 3/4:</b> Введите ваш email (необязательно)
-
-Email будет использован для отправки информации о заказе.
-"""
-
-    await message.answer(
-        text,
-        reply_markup=skip_keyboard("skip_email"),
-        parse_mode="HTML"
-    )
+    # Show confirmation
+    await show_order_confirmation(message, state, is_callback=False)
 
 
-@router.callback_query(F.data == "skip_email", CheckoutStates.waiting_email)
-async def skip_email(callback: CallbackQuery, state: FSMContext):
-    """Skip email input"""
-    await state.update_data(email=None)
-    await state.set_state(CheckoutStates.waiting_address)
-
-    text = """
-📝 <b>Оформление заказа</b>
-
-<b>Шаг 4/4:</b> Введите адрес доставки
-
-Укажите полный адрес с индексом, городом, улицей и номером дома/квартиры.
-"""
-
-    await callback.message.edit_text(
-        text,
-        reply_markup=skip_keyboard("skip_address"),
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-
-@router.message(CheckoutStates.waiting_email)
-async def process_email(message: Message, state: FSMContext, db: AsyncSession):
-    """Process customer email"""
-    email = message.text.strip()
-
-    # Simple email validation
-    if '@' not in email or '.' not in email:
-        await message.answer("❌ Неверный формат email. Пожалуйста, введите корректный email или пропустите этот шаг.")
-        return
-
-    await state.update_data(email=email)
-
-    # Save email to user profile
-    await user_service.update_email(db, message.from_user.id, email)
-
-    await state.set_state(CheckoutStates.waiting_address)
-
-    text = """
-📝 <b>Оформление заказа</b>
-
-<b>Шаг 4/4:</b> Введите адрес доставки
-
-Укажите полный адрес с индексом, городом, улицей и номером дома/квартиры.
-"""
-
-    await message.answer(
-        text,
-        reply_markup=skip_keyboard("skip_address"),
-        parse_mode="HTML"
-    )
-
-
-@router.callback_query(F.data == "skip_address", CheckoutStates.waiting_address)
-async def skip_address(callback: CallbackQuery, state: FSMContext):
-    """Skip address (pickup)"""
-    await state.update_data(address="Самовывоз")
-    await show_order_confirmation(callback.message, state)
-    await callback.answer()
-
-
-@router.message(CheckoutStates.waiting_address)
-async def process_address(message: Message, state: FSMContext):
-    """Process delivery address"""
-    address = message.text.strip()
-
-    if len(address) < 10:
-        await message.answer("❌ Адрес слишком короткий. Пожалуйста, укажите полный адрес.")
-        return
-
-    await state.update_data(address=address)
-    await show_order_confirmation(message, state)
-
-
-async def show_order_confirmation(message: Message, state: FSMContext):
-    """Show order confirmation"""
+async def show_order_confirmation(message: Message, state: FSMContext, is_callback: bool = False):
+    """Show order confirmation with pre-filled data"""
     data = await state.get_data()
     user_id = message.from_user.id if hasattr(message, 'from_user') else message.chat.id
 
@@ -236,9 +206,16 @@ async def show_order_confirmation(message: Message, state: FSMContext):
     items_text = []
     for item in cart["items"]:
         product = item["product"]
+        if isinstance(product, dict):
+            name = product.get("name", "Товар")
+            price = product.get("price", 0)
+        else:
+            name = product.name
+            price = product.price
+
         items_text.append(
-            f"• {product['name']}\n"
-            f"  {format_price(product['price'])} × {item['quantity']} = {format_price(item['subtotal'])}"
+            f"• {name}\n"
+            f"  {format_price(price)} × {item['quantity']} = {format_price(item['subtotal'])}"
         )
 
     text = f"""
@@ -248,7 +225,7 @@ async def show_order_confirmation(message: Message, state: FSMContext):
 👤 Имя: {data.get('name', 'Не указано')}
 📞 Телефон: {data.get('phone', 'Не указан')}
 📧 Email: {data.get('email', 'Не указан')}
-📍 Адрес: {data.get('address', 'Самовывоз')}
+📍 Доставка: {data.get('address', 'Самовывоз')}
 
 <b>Товары:</b>
 {chr(10).join(items_text)}
@@ -256,31 +233,112 @@ async def show_order_confirmation(message: Message, state: FSMContext):
 ━━━━━━━━━━━━━━━━━
 💰 <b>Итого: {format_price(cart['total'])}</b>
 
-Подтвердите заказ для перехода к оплате.
+Проверьте данные и подтвердите заказ для перехода к оплате.
 """
 
     await state.set_state(CheckoutStates.confirm)
 
-    await message.answer(
-        text,
-        reply_markup=checkout_confirm_keyboard(),
-        parse_mode="HTML"
-    )
+    # Create inline keyboard with edit options
+    builder = InlineKeyboardBuilder()
+
+    builder.button(text="✅ Подтвердить и оплатить", callback_data="confirm_order")
+    builder.button(text="✏️ Изменить адрес", callback_data="edit_address")
+    builder.button(text="✏️ Изменить имя", callback_data="edit_name")
+    if data.get('phone'):
+        builder.button(text="📞 Изменить телефон", callback_data="edit_phone")
+    builder.button(text="❌ Отменить", callback_data="cancel_order")
+
+    builder.adjust(1)
+
+    if is_callback:
+        try:
+            await message.edit_text(
+                text,
+                reply_markup=builder.as_markup(),
+                parse_mode="HTML"
+            )
+        except TelegramBadRequest:
+            await message.answer(
+                text,
+                reply_markup=builder.as_markup(),
+                parse_mode="HTML"
+            )
+    else:
+        await message.answer(
+            text,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
 
 
-@router.callback_query(F.data == "edit_order", CheckoutStates.confirm)
-async def edit_order(callback: CallbackQuery, state: FSMContext):
-    """Go back to edit order details"""
+# Edit handlers
+@router.callback_query(F.data == "edit_name", CheckoutStates.confirm)
+async def edit_name(callback: CallbackQuery, state: FSMContext):
+    """Edit customer name"""
     await state.set_state(CheckoutStates.waiting_name)
 
-    text = """
-📝 <b>Редактирование заказа</b>
-
-Введите ваше имя:
-"""
-
-    await callback.message.edit_text(text, parse_mode="HTML")
+    await callback.message.edit_text(
+        "📝 Введите ваше имя:",
+        parse_mode="HTML"
+    )
     await callback.answer()
+
+
+@router.message(CheckoutStates.waiting_name)
+async def process_name_edit(message: Message, state: FSMContext):
+    """Process edited name"""
+    name = message.text.strip()
+
+    if len(name) < 2:
+        await message.answer("❌ Имя слишком короткое. Пожалуйста, введите корректное имя.")
+        return
+
+    await state.update_data(name=name)
+    await show_order_confirmation(message, state, is_callback=False)
+
+
+@router.callback_query(F.data == "edit_phone", CheckoutStates.confirm)
+async def edit_phone(callback: CallbackQuery, state: FSMContext):
+    """Edit phone number"""
+    data = await state.get_data()
+    cart = await cart_service.get_cart(callback.from_user.id)
+
+    await ask_for_phone(callback.message, state, cart['total'])
+    await callback.answer()
+
+
+@router.callback_query(F.data == "edit_address", CheckoutStates.confirm)
+async def edit_address(callback: CallbackQuery, state: FSMContext):
+    """Edit delivery address"""
+    await state.set_state(CheckoutStates.waiting_address)
+
+    await callback.message.edit_text(
+        "📍 Введите адрес доставки или нажмите кнопку ниже для самовывоза:",
+        reply_markup=skip_keyboard("skip_address"),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "skip_address", CheckoutStates.waiting_address)
+async def skip_address(callback: CallbackQuery, state: FSMContext):
+    """Skip address (pickup)"""
+    await state.update_data(address="Самовывоз")
+    await show_order_confirmation(callback.message, state, is_callback=True)
+    await callback.answer()
+
+
+@router.message(CheckoutStates.waiting_address)
+async def process_address_edit(message: Message, state: FSMContext):
+    """Process edited address"""
+    address = message.text.strip()
+
+    if len(address) < 5:
+        await message.answer("❌ Адрес слишком короткий. Пожалуйста, укажите полный адрес.")
+        return
+
+    await state.update_data(address=address)
+    await show_order_confirmation(message, state, is_callback=False)
 
 
 @router.callback_query(F.data == "cancel_order", CheckoutStates.confirm)
