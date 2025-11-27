@@ -8,6 +8,7 @@ class CheckoutStates(StatesGroup):
     """States for order checkout process"""
     waiting_name = State()
     waiting_phone = State()
+    waiting_phone_manual = State()
     waiting_email = State()
     waiting_address = State()
     waiting_comment = State()
