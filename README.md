@@ -41,7 +41,8 @@ API использует аутентификацию через Username и Key
 ## Установка и настройка
 
 ### Требования
-- Docker и Docker Compose
+- **Docker** версии 20.10+ с встроенным Docker Compose V2
+  - Используется команда `docker compose` (не `docker-compose`)
 - Telegram Bot Token (от [@BotFather](https://t.me/botfather))
 - YooMoney аккаунт с API токеном
 - Доступ к базе данных OpenCart (read-only)
@@ -122,13 +123,13 @@ FLUSH PRIVILEGES;
 
 ```bash
 # Сборка и запуск контейнеров
-docker-compose up -d --build
+docker compose up -d --build
 
 # Просмотр логов
-docker-compose logs -f bot
+docker compose logs -f bot
 
 # Остановка
-docker-compose down
+docker compose down
 ```
 
 ### Шаг 6: Проверка работы
@@ -234,13 +235,13 @@ echo ".env" >> .gitignore
 
 ```bash
 # Все логи
-docker-compose logs -f
+docker compose logs -f
 
 # Только логи бота
-docker-compose logs -f bot
+docker compose logs -f bot
 
 # Логи с фильтром
-docker-compose logs -f bot | grep ERROR
+docker compose logs -f bot | grep ERROR
 ```
 
 ### Файлы логов
@@ -255,12 +256,12 @@ docker-compose logs -f bot | grep ERROR
 
 1. Проверьте, запущен ли контейнер:
    ```bash
-   docker-compose ps
+   docker compose ps
    ```
 
 2. Проверьте логи:
    ```bash
-   docker-compose logs -f bot
+   docker compose logs -f bot
    ```
 
 3. Проверьте токен бота в `.env`
@@ -269,7 +270,7 @@ docker-compose logs -f bot | grep ERROR
 
 1. Проверьте доступность OpenCart БД:
    ```bash
-   docker-compose exec bot ping OPENCART_DB_HOST
+   docker compose exec bot ping OPENCART_DB_HOST
    ```
 
 2. Проверьте данные для подключения в `.env`
@@ -280,10 +281,10 @@ docker-compose logs -f bot | grep ERROR
 
 ```bash
 # Перезапустить Redis
-docker-compose restart redis
+docker compose restart redis
 
 # Проверить подключение
-docker-compose exec redis redis-cli ping
+docker compose exec redis redis-cli ping
 ```
 
 ### Ошибки YooMoney
@@ -296,13 +297,13 @@ docker-compose exec redis redis-cli ping
 
 ```bash
 # Остановить контейнеры
-docker-compose down
+docker compose down
 
 # Обновить код
 git pull
 
 # Пересобрать и запустить
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 ## Разработка
