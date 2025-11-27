@@ -28,9 +28,17 @@ def format_cart_item(item: Dict[str, Any]) -> str:
     quantity = item["quantity"]
     subtotal = item["subtotal"]
 
+    # Handle both dict and object access for product
+    if isinstance(product, dict):
+        name = product.get("name", "Товар")
+        price = product.get("price", 0)
+    else:
+        name = product.name
+        price = product.price
+
     return (
-        f"• {product.name}\n"
-        f"  {format_price(product.price)} × {quantity} = {format_price(subtotal)}"
+        f"• {name}\n"
+        f"  {format_price(price)} × {quantity} = {format_price(subtotal)}"
     )
 
 
