@@ -255,14 +255,18 @@ async def show_product(callback: CallbackQuery):
             await callback.answer("Товар не найден", show_alert=True)
             return
 
-        # Format product card
-        text = format_product_card(product)
+        # Generate product URL for OpenCart
+        product_url = f"{settings.OPENCART_URL}/index.php?route=product/product&product_id={product_id}"
 
-        # Prepare keyboard
+        # Format product card with URL for truncated descriptions
+        text = format_product_card(product, product_url=product_url)
+
+        # Prepare keyboard with product URL button
         keyboard = product_card_keyboard(
             product_id,
             product.get('category_id', 0),
-            product.get('in_stock', False)
+            product.get('in_stock', False),
+            product_url=product_url
         )
 
         # Check if current message has photo

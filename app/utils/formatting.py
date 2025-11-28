@@ -125,44 +125,72 @@ def escape_markdown(text: str) -> str:
     return ''.join(['\\' + char if char in escape_chars else char for char in text])
 
 
-def format_product_card(product, description_length: int = 300) -> str:
-    """Format product details card"""
+def format_product_card(product, description_length: int = 300, product_url: str = None) -> str:
+    """Format product details card with HTML styling"""
     # Handle both dict and object access
     if isinstance(product, dict):
+        name = product.get('name', 'Без названия')
         desc = product.get('description') or "Описание отсутствует"
-        if len(desc) > description_length:
+        price = product.get('price', 0)
+        quantity = product.get('quantity', 0)
+        model = product.get('model', 'Н/Д')
+
+        # Check if description is truncated
+        full_description = desc
+        is_truncated = len(desc) > description_length
+
+        if is_truncated:
             desc = desc[:description_length] + "..."
 
-        quantity = product.get('quantity', 0)
-        stock_text = "В наличии" if quantity > 0 else "Нет в наличии"
-        stock_emoji = "✅" if quantity > 0 else "❌"
+        stock_text = "✅ В наличии" if quantity > 0 else "❌ Нет в наличии"
+
+        # Build description with link if truncated
+        description_html = f"<i>{desc}</i>"
+        if is_truncated and product_url:
+            description_html += f'\n\n<a href="{product_url}">📖 Читать полное описание →</a>'
 
         return f"""
-<b>{product.get('name', 'Без названия')}</b>
+<b>🛍 {name}</b>
 
-{desc}
+{description_html}
 
-💰 <b>Цена:</b> {format_price(product.get('price', 0))}
-📦 <b>Наличие:</b> {stock_emoji} {stock_text}
-🏷 <b>Артикул:</b> {product.get('model', 'Н/Д')}
+━━━━━━━━━━━━━━━━━
+💰 <b>Цена:</b> <code>{format_price(price)}</code>
+📦 <b>Статус:</b> {stock_text}
+🏷 <b>Артикул:</b> <code>{model}</code>
+━━━━━━━━━━━━━━━━━
 """
     else:
         # Object attribute access (fallback for compatibility)
+        name = product.name
         desc = product.description or "Описание отсутствует"
-        if len(desc) > description_length:
+        price = product.price
+        quantity = product.quantity
+        model = product.model
+
+        full_description = desc
+        is_truncated = len(desc) > description_length
+
+        if is_truncated:
             desc = desc[:description_length] + "..."
 
-        stock_text = "В наличии" if product.quantity > 0 else "Нет в наличии"
-        stock_emoji = "✅" if product.quantity > 0 else "❌"
+        stock_text = "✅ В наличии" if quantity > 0 else "❌ Нет в наличии"
+
+        # Build description with link if truncated
+        description_html = f"<i>{desc}</i>"
+        if is_truncated and product_url:
+            description_html += f'\n\n<a href="{product_url}">📖 Читать полное описание →</a>'
 
         return f"""
-<b>{product.name}</b>
+<b>🛍 {name}</b>
 
-{desc}
+{description_html}
 
-💰 <b>Цена:</b> {format_price(product.price)}
-📦 <b>Наличие:</b> {stock_emoji} {stock_text}
-🏷 <b>Артикул:</b> {product.model}
+━━━━━━━━━━━━━━━━━
+💰 <b>Цена:</b> <code>{format_price(price)}</code>
+📦 <b>Статус:</b> {stock_text}
+🏷 <b>Артикул:</b> <code>{model}</code>
+━━━━━━━━━━━━━━━━━
 """
 
 
