@@ -8,9 +8,13 @@ import html
 
 
 def clean_html(text: str) -> str:
-    """Remove HTML tags and decode entities"""
+    """Remove HTML tags and decode entities, safe for Telegram HTML parse_mode"""
     if not text:
         return ""
+
+    # First, decode HTML entities BEFORE removing tags
+    # This prevents double-decoding issues
+    text = html.unescape(text)
 
     # Replace block-level tags with space to preserve word boundaries
     text = re.sub(r'</(p|div|h[1-6]|li|tr|td|th|br)>', ' ', text, flags=re.IGNORECASE)
@@ -19,8 +23,11 @@ def clean_html(text: str) -> str:
     # Remove all remaining HTML tags
     text = re.sub(r'<[^>]+>', '', text)
 
-    # Decode HTML entities
-    text = html.unescape(text)
+    # Escape special HTML characters for Telegram
+    # Telegram's HTML parse_mode requires escaping these characters if they appear in text
+    text = text.replace('&', '&amp;')
+    text = text.replace('<', '&lt;')
+    text = text.replace('>', '&gt;')
 
     # Clean up extra whitespace and newlines
     text = re.sub(r'\s+', ' ', text).strip()
