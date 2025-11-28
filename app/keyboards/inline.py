@@ -124,7 +124,7 @@ def products_keyboard(
     return builder.as_markup()
 
 
-def product_card_keyboard(product_id: int, category_id: int, in_stock: bool = True) -> InlineKeyboardMarkup:
+def product_card_keyboard(product_id: int, category_id: int, in_stock: bool = True, product_url: str = None) -> InlineKeyboardMarkup:
     """Keyboard for product card"""
     builder = InlineKeyboardBuilder()
 
@@ -132,6 +132,13 @@ def product_card_keyboard(product_id: int, category_id: int, in_stock: bool = Tr
         builder.button(
             text="➕ В корзину",
             callback_data=f"addcart:{product_id}"
+        )
+
+    # Add "View Product" button with URL if provided
+    if product_url:
+        builder.button(
+            text="🌐 Посмотреть товар на сайте",
+            url=product_url
         )
 
     builder.button(
