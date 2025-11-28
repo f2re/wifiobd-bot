@@ -3,6 +3,61 @@ Text formatting utilities for Telegram messages
 """
 from typing import List, Dict, Any
 from datetime import datetime
+import re
+import html
+
+
+def clean_html(text: str) -> str:
+    """Remove HTML tags and decode entities"""
+    if not text:
+        return ""
+
+    # Replace block-level tags with space to preserve word boundaries
+    text = re.sub(r'</(p|div|h[1-6]|li|tr|td|th|br)>', ' ', text, flags=re.IGNORECASE)
+    text = re.sub(r'<(br|hr)\s*/?>', ' ', text, flags=re.IGNORECASE)
+
+    # Remove all remaining HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+
+    # Decode HTML entities
+    text = html.unescape(text)
+
+    # Clean up extra whitespace and newlines
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    return text
+
+
+def smart_truncate(text: str, max_length: int = 300) -> tuple:
+    """
+    Truncate text at sentence or word boundary
+
+    Returns:
+        tuple: (truncated_text, was_truncated)
+    """
+    if len(text) <= max_length:
+        return text, False
+
+    # Try to truncate at sentence boundary (look ahead a bit to find complete sentence)
+    search_text = text[:max_length + 100]
+    sentences = re.split(r'([.!?]+)\s+', search_text)
+
+    # Reconstruct sentences with their punctuation
+    accumulated = ""
+    for i in range(0, len(sentences) - 1, 2):
+        sentence = sentences[i]
+        punct = sentences[i + 1] if i + 1 < len(sentences) else ""
+        if len(accumulated + sentence + punct) <= max_length:
+            accumulated += sentence + punct + " "
+        else:
+            break
+
+    if accumulated.strip():
+        return accumulated.strip(), True
+
+    # Fallback to word boundary if no sentence found
+    truncated = text[:max_length].rsplit(' ', 1)[0]
+    return truncated + '...', True
 
 
 def format_price(price: float) -> str:
@@ -135,12 +190,11 @@ def format_product_card(product, description_length: int = 300, product_url: str
         quantity = product.get('quantity', 0)
         model = product.get('model', 'Н/Д')
 
-        # Check if description is truncated
-        full_description = desc
-        is_truncated = len(desc) > description_length
+        # Clean HTML tags and entities from description
+        desc = clean_html(desc)
 
-        if is_truncated:
-            desc = desc[:description_length] + "..."
+        # Smart truncation at sentence or word boundary
+        desc, is_truncated = smart_truncate(desc, description_length)
 
         stock_text = "✅ В наличии" if quantity > 0 else "❌ Нет в наличии"
 
@@ -168,11 +222,11 @@ def format_product_card(product, description_length: int = 300, product_url: str
         quantity = product.quantity
         model = product.model
 
-        full_description = desc
-        is_truncated = len(desc) > description_length
+        # Clean HTML tags and entities from description
+        desc = clean_html(desc)
 
-        if is_truncated:
-            desc = desc[:description_length] + "..."
+        # Smart truncation at sentence or word boundary
+        desc, is_truncated = smart_truncate(desc, description_length)
 
         stock_text = "✅ В наличии" if quantity > 0 else "❌ Нет в наличии"
 
