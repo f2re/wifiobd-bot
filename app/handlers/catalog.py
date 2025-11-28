@@ -23,14 +23,14 @@ router = Router()
 
 @router.callback_query(F.data == "catalog")
 async def show_catalog(callback: CallbackQuery):
-    """Show root categories"""
+    """Show catalog - auto-redirect to 'Магазин' category"""
     try:
         categories = await opencart_service.get_root_categories()
 
-        # Check if current message has photo
-        has_photo = callback.message.photo is not None and len(callback.message.photo) > 0
-
         if not categories:
+            # Check if current message has photo
+            has_photo = callback.message.photo is not None and len(callback.message.photo) > 0
+
             text = "📂 <b>Каталог пуст</b>\n\nВ данный момент категории не доступны."
             keyboard = back_to_main_menu_keyboard()
 
@@ -56,28 +56,128 @@ async def show_catalog(callback: CallbackQuery):
             await callback.answer()
             return
 
-        text = "📂 <b>Каталог товаров</b>\n\nВыберите категорию:"
-        keyboard = categories_keyboard(categories)
+        # Find "Магазин" category by name
+        shop_category = None
+        for category in categories:
+            if category['name'].lower() == 'магазин':
+                shop_category = category
+                break
 
-        if has_photo:
-            await callback.message.delete()
-            await callback.message.answer(
-                text,
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
+        # If "Магазин" category found, redirect to it directly
+        if shop_category:
+            # Get subcategories of "Магазин"
+            shop_category_id = shop_category['category_id']
+            subcategories = await opencart_service.get_subcategories(shop_category_id)
+
+            # Check if current message has photo
+            has_photo = callback.message.photo is not None and len(callback.message.photo) > 0
+
+            if subcategories:
+                # Show subcategories of "Магазин"
+                text = "📂 <b>Каталог товаров</b>\n\nВыберите категорию:"
+                keyboard = categories_keyboard(subcategories, 0)  # parent_id=0 to go back to main menu
+
+                if has_photo:
+                    await callback.message.delete()
+                    await callback.message.answer(
+                        text,
+                        reply_markup=keyboard,
+                        parse_mode="HTML"
+                    )
+                else:
+                    try:
+                        await callback.message.edit_text(
+                            text,
+                            reply_markup=keyboard,
+                            parse_mode="HTML"
+                        )
+                    except TelegramBadRequest as e:
+                        if "message is not modified" in str(e):
+                            pass
+                        else:
+                            raise
+            else:
+                # No subcategories, show products from "Магазин"
+                products = await opencart_service.get_products_by_category(
+                    shop_category_id,
+                    limit=settings.PRODUCTS_PER_PAGE,
+                    offset=0
+                )
+
+                if products:
+                    text = "📂 <b>Каталог товаров</b>\n\nВыберите товар:"
+                    has_next = len(products) == settings.PRODUCTS_PER_PAGE
+                    keyboard = products_keyboard(products, shop_category_id, 0, has_next, 0)
+
+                    if has_photo:
+                        await callback.message.delete()
+                        await callback.message.answer(
+                            text,
+                            reply_markup=keyboard,
+                            parse_mode="HTML"
+                        )
+                    else:
+                        try:
+                            await callback.message.edit_text(
+                                text,
+                                reply_markup=keyboard,
+                                parse_mode="HTML"
+                            )
+                        except TelegramBadRequest as e:
+                            if "message is not modified" in str(e):
+                                pass
+                            else:
+                                raise
+                else:
+                    # No products either
+                    text = "📂 <b>Каталог</b>\n\n😔 В данный момент товары не доступны."
+                    keyboard = back_to_main_menu_keyboard()
+
+                    if has_photo:
+                        await callback.message.delete()
+                        await callback.message.answer(
+                            text,
+                            reply_markup=keyboard,
+                            parse_mode="HTML"
+                        )
+                    else:
+                        try:
+                            await callback.message.edit_text(
+                                text,
+                                reply_markup=keyboard,
+                                parse_mode="HTML"
+                            )
+                        except TelegramBadRequest as e:
+                            if "message is not modified" in str(e):
+                                pass
+                            else:
+                                raise
         else:
-            try:
-                await callback.message.edit_text(
+            # "Магазин" category not found, show all root categories as fallback
+            has_photo = callback.message.photo is not None and len(callback.message.photo) > 0
+
+            text = "📂 <b>Каталог товаров</b>\n\nВыберите категорию:"
+            keyboard = categories_keyboard(categories)
+
+            if has_photo:
+                await callback.message.delete()
+                await callback.message.answer(
                     text,
                     reply_markup=keyboard,
                     parse_mode="HTML"
                 )
-            except TelegramBadRequest as e:
-                if "message is not modified" in str(e):
-                    pass
-                else:
-                    raise
+            else:
+                try:
+                    await callback.message.edit_text(
+                        text,
+                        reply_markup=keyboard,
+                        parse_mode="HTML"
+                    )
+                except TelegramBadRequest as e:
+                    if "message is not modified" in str(e):
+                        pass
+                    else:
+                        raise
 
         await callback.answer()
 
