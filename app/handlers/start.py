@@ -1,192 +1,123 @@
 """
-Start command and main menu handlers
+Start handler for VK bot - main menu and help
 """
-from aiogram import Router, F
-from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, CallbackQuery
-from aiogram.fsm.context import FSMContext
-from aiogram.exceptions import TelegramBadRequest
-from sqlalchemy.ext.asyncio import AsyncSession
+from vkbottle.bot import Bot, Message
+from vkbottle import Keyboard, KeyboardButtonColor, Text
 
-from app.keyboards.inline import main_menu_keyboard, cart_keyboard, back_to_main_menu_keyboard
+from app.keyboards.inline import VKKeyboards
 from app.services.user import user_service
-from app.services.cart import cart_service
 from app.utils.logger import get_logger
-from app.utils.formatting import format_cart_summary
+from config import settings
 
 logger = get_logger(__name__)
 
-router = Router()
 
+def register_handlers(bot: Bot):
+    """Register start handlers"""
 
-@router.message(CommandStart())
-async def cmd_start(message: Message, db: AsyncSession, state: FSMContext):
-    """Handle /start command"""
-    try:
-        # Clear any active state
-        await state.clear()
-
-        # Get or create user
-        user = await user_service.get_or_create_user(
-            db=db,
-            user_id=message.from_user.id,
-            username=message.from_user.username,
-            first_name=message.from_user.first_name,
-            last_name=message.from_user.last_name
-        )
-
-        welcome_text = f"""
-👋 <b>Добро пожаловать в WifiOBD!</b>
-
-Здравствуйте, {user.first_name}!
-
-Мы рады приветствовать вас в нашем магазине автомобильной диагностики.
-
-🛍 <b>Каталог</b> - просмотр товаров
-🛒 <b>Корзина</b> - ваша корзина покупок
-📦 <b>Мои заказы</b> - история заказов
-💬 <b>Поддержка</b> - связаться с нами
-
-Выберите раздел:
-"""
-
-        await message.answer(
-            welcome_text,
-            reply_markup=main_menu_keyboard(),
-            parse_mode="HTML"
-        )
-
-        logger.info(f"User {message.from_user.id} started the bot")
-
-    except Exception as e:
-        logger.error(f"Error in start handler: {e}")
-        await message.answer(
-            "Произошла ошибка. Пожалуйста, попробуйте позже.",
-            reply_markup=main_menu_keyboard()
-        )
-
-
-@router.callback_query(F.data == "start")
-async def callback_start(callback: CallbackQuery, db: AsyncSession, state: FSMContext):
-    """Handle main menu callback"""
-    try:
-        # Clear any active state
-        await state.clear()
-
-        # Get user info
-        user = await user_service.get_or_create_user(
-            db=db,
-            user_id=callback.from_user.id,
-            username=callback.from_user.username,
-            first_name=callback.from_user.first_name,
-            last_name=callback.from_user.last_name
-        )
-
-        welcome_text = f"""
-🏠 <b>Главное меню</b>
-
-Здравствуйте, {user.first_name}!
-
-Выберите раздел:
-"""
-
-        # Check if current message has photo
-        has_photo = callback.message.photo is not None and len(callback.message.photo) > 0
-
-        if has_photo:
-            # Delete photo message and send text
-            await callback.message.delete()
-            await callback.message.answer(
-                welcome_text,
-                reply_markup=main_menu_keyboard(),
-                parse_mode="HTML"
+    @bot.on.message(text=["Начать", "начать", "start", "/start"])
+    async def start_handler(message: Message):
+        """Handle start command"""
+        try:
+            # Get or create user
+            user = await user_service.get_or_create_user(
+                vk_id=message.from_id,
+                first_name=message.from_id  # Will be updated from VK API
             )
-        else:
-            try:
-                await callback.message.edit_text(
-                    welcome_text,
-                    reply_markup=main_menu_keyboard(),
-                    parse_mode="HTML"
-                )
-            except TelegramBadRequest as e:
-                if "message is not modified" in str(e):
-                    pass
-                else:
-                    raise
 
-        await callback.answer()
+            welcome_text = (
+                f"👋 Добро пожаловать в магазин WifiOBD!\n\n"
+                f"Здесь вы можете:\n"
+                f"🛍 Просмотреть каталог товаров\n"
+                f"🛒 Добавить товары в корзину\n"
+                f"💳 Оплатить заказ онлайн\n"
+                f"📦 Отслеживать статус заказа\n\n"
+                f"Выберите действие:"
+            )
 
-    except Exception as e:
-        logger.error(f"Error in main menu callback: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
+            await message.answer(
+                message=welcome_text,
+                keyboard=VKKeyboards.main_menu()
+            )
 
+            logger.info(f"User {message.from_id} started the bot")
 
-@router.message(Command("help"))
-async def cmd_help(message: Message):
-    """Handle /help command"""
-    help_text = """
-📖 <b>Справка по боту</b>
+        except Exception as e:
+            logger.error(f"Error in start handler: {e}", exc_info=True)
+            await message.answer(
+                "❌ Произошла ошибка. Попробуйте позже.",
+                keyboard=VKKeyboards.main_menu()
+            )
 
-<b>Команды:</b>
-/start - Главное меню
-/cart - Открыть корзину
-/help - Эта справка
-/admin - Админ-панель (только для администраторов)
+    @bot.on.message(text=["Помощь", "помощь", "ℹ️ Помощь", "/help"])
+    async def help_handler(message: Message):
+        """Handle help command"""
+        try:
+            help_text = (
+                "📖 <b>Справка по боту WifiOBD</b>\n\n"
+                "<b>Основные команды:</b>\n"
+                "🛍 <b>Каталог</b> - просмотр товаров\n"
+                "🛒 <b>Корзина</b> - управление корзиной\n"
+                "📦 <b>Мои заказы</b> - история покупок\n"
+                "💬 <b>Поддержка</b> - связь с нами\n\n"
+                "<b>Оплата:</b>\n"
+                "Принимаем оплату банковскими картами через YooKassa.\n"
+                "Все платежи защищены и безопасны.\n\n"
+                "<b>Доставка:</b>\n"
+                "Доставка по всей России транспортными компаниями.\n\n"
+                "<b>Контакты:</b>\n"
+                f"🌐 Сайт: {settings.OPENCART_URL}\n"
+                "📧 Email: support@wifiobd.ru\n\n"
+                "Если у вас остались вопросы, нажмите 💬 Поддержка"
+            )
 
-<b>Разделы:</b>
-🛍 <b>Каталог</b> - просмотр категорий и товаров
-🛒 <b>Корзина</b> - управление корзиной
-📦 <b>Мои заказы</b> - просмотр истории заказов
-💬 <b>Поддержка</b> - обратиться в службу поддержки
+            await message.answer(
+                message=help_text,
+                keyboard=VKKeyboards.main_menu()
+            )
 
-<b>Оплата:</b>
-Мы принимаем оплату через ЮMoney (банковские карты).
+        except Exception as e:
+            logger.error(f"Error in help handler: {e}", exc_info=True)
+            await message.answer(
+                "❌ Произошла ошибка. Попробуйте позже.",
+                keyboard=VKKeyboards.main_menu()
+            )
 
-<b>Контакты:</b>
-🌐 Сайт: https://wifiobd.ru
-📧 Email: support@wifiobd.ru
+    @bot.on.message(text="🔙 Главное меню")
+    async def main_menu_handler(message: Message):
+        """Return to main menu"""
+        try:
+            await message.answer(
+                message="Главное меню:",
+                keyboard=VKKeyboards.main_menu()
+            )
+        except Exception as e:
+            logger.error(f"Error in main menu handler: {e}", exc_info=True)
 
-По всем вопросам обращайтесь в раздел "Поддержка".
-"""
+    # Admin command
+    @bot.on.message(text=["Админ", "админ", "admin", "/admin"])
+    async def admin_handler(message: Message):
+        """Handle admin command"""
+        try:
+            # Check if user is admin
+            if message.from_id not in settings.ADMIN_IDS:
+                await message.answer("❌ У вас нет прав администратора.")
+                return
 
-    await message.answer(
-        help_text,
-        reply_markup=main_menu_keyboard(),
-        parse_mode="HTML"
-    )
+            admin_text = (
+                "👨‍💼 <b>Панель администратора</b>\n\n"
+                "Выберите действие:"
+            )
 
+            await message.answer(
+                message=admin_text,
+                keyboard=VKKeyboards.admin_menu()
+            )
 
-@router.message(Command("cart"))
-async def cmd_cart(message: Message):
-    """Handle /cart command - quick access to shopping cart"""
-    try:
-        user_id = message.from_user.id
+            logger.info(f"Admin {message.from_id} accessed admin panel")
 
-        # Get cart
-        cart = await cart_service.get_cart(user_id)
+        except Exception as e:
+            logger.error(f"Error in admin handler: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка.")
 
-        if not cart["items"]:
-            text = "🛒 <b>Ваша корзина пуста</b>\n\nДобавьте товары из каталога."
-            keyboard = back_to_main_menu_keyboard()
-        else:
-            text = format_cart_summary(cart)
-            keyboard = cart_keyboard(has_items=True)
-
-        await message.answer(
-            text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
-
-    except Exception as e:
-        logger.error(f"Error in /cart command: {e}")
-        await message.answer(
-            "Произошла ошибка при загрузке корзины",
-            reply_markup=main_menu_keyboard()
-        )
-
-
-@router.callback_query(F.data == "noop")
-async def callback_noop(callback: CallbackQuery):
-    """Handle no-op callbacks (e.g., page indicators)"""
-    await callback.answer()
+    logger.info("Start handlers registered")
