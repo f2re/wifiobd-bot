@@ -1,18 +1,16 @@
 """
-Main entry point for the bot
+Main entry point for VK bot
 """
 import asyncio
 import sys
-from contextlib import asynccontextmanager
 
-from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
+from vkbottle.bot import Bot
+from vkbottle import API
 
-from app.bot import bot, dp
+from app.bot import bot, api, labeler
 from app.database import init_db
 from app.services.cart import cart_service
-from app.middlewares import ThrottlingMiddleware, DatabaseMiddleware
-from app.handlers import routers
+from app.handlers import register_handlers
 from app.utils.logger import get_logger
 from config import settings
 
@@ -21,7 +19,7 @@ logger = get_logger(__name__)
 
 async def on_startup():
     """Actions to perform on bot startup"""
-    logger.info("Bot is starting up...")
+    logger.info("VK Bot is starting up...")
 
     # Initialize database
     try:
@@ -39,12 +37,20 @@ async def on_startup():
         logger.error(f"Failed to initialize Redis: {e}")
         raise
 
-    logger.info("Bot startup completed successfully")
+    # Get group info
+    try:
+        group_info = await api.groups.get_by_id(group_ids=[settings.VK_GROUP_ID])
+        if group_info:
+            logger.info(f"Connected to VK Group: {group_info[0].name} (ID: {group_info[0].id})")
+    except Exception as e:
+        logger.warning(f"Could not fetch group info: {e}")
+
+    logger.info("VK Bot startup completed successfully")
 
 
 async def on_shutdown():
     """Actions to perform on bot shutdown"""
-    logger.info("Bot is shutting down...")
+    logger.info("VK Bot is shutting down...")
 
     # Close Redis connection
     try:
@@ -53,42 +59,25 @@ async def on_shutdown():
     except Exception as e:
         logger.error(f"Error closing Redis: {e}")
 
-    # Close bot session
-    await bot.session.close()
-
-    logger.info("Bot shutdown completed")
+    logger.info("VK Bot shutdown completed")
 
 
 async def main():
-    """Main function to run the bot"""
+    """Main function to run the VK bot"""
     try:
-        # Register middlewares
-        dp.message.middleware(DatabaseMiddleware())
-        dp.callback_query.middleware(DatabaseMiddleware())
-        dp.message.middleware(ThrottlingMiddleware())
-        dp.callback_query.middleware(ThrottlingMiddleware())
-
-        logger.info("Middlewares registered")
-
-        # Register routers
-        for router in routers:
-            dp.include_router(router)
-
-        logger.info(f"Registered {len(routers)} routers")
+        # Register handlers
+        register_handlers(bot)
+        logger.info("Handlers registered")
 
         # Run startup actions
         await on_startup()
 
-        # Start polling
-        logger.info("Starting bot polling...")
-        logger.info(f"Bot @{(await bot.get_me()).username} is running!")
+        # Start bot
+        logger.info("Starting VK bot polling...")
+        logger.info(f"VK Bot is running for group ID: {settings.VK_GROUP_ID}")
 
         try:
-            await dp.start_polling(
-                bot,
-                allowed_updates=dp.resolve_used_update_types(),
-                drop_pending_updates=True
-            )
+            await bot.run_polling()
         finally:
             await on_shutdown()
 
