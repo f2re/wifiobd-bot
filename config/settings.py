@@ -1,73 +1,110 @@
 """
-Configuration settings for the WifiOBD Telegram Bot
+Configuration settings for VK bot
 """
 import os
-from pathlib import Path
+from typing import List
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Base directory
-BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Telegram Bot
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_IDS = [int(id.strip()) for id in os.getenv("ADMIN_IDS", "").split(",") if id.strip()]
+class Settings:
+    """Application settings"""
 
-# OpenCart Configuration
-OPENCART_URL = os.getenv("OPENCART_URL", "https://wifiobd.ru")
+    # VK Bot
+    VK_TOKEN: str = os.getenv("VK_TOKEN", "")
+    VK_GROUP_ID: int = int(os.getenv("VK_GROUP_ID", "0"))
+    VK_API_VERSION: str = os.getenv("VK_API_VERSION", "5.131")
+    VK_CONFIRMATION_CODE: str = os.getenv("VK_CONFIRMATION_CODE", "")
+    
+    # Admin users (VK IDs)
+    ADMIN_IDS: List[int] = [
+        int(id.strip()) 
+        for id in os.getenv("ADMIN_IDS", "").split(",") 
+        if id.strip()
+    ]
 
-# OpenCart API (Version 3.0.2.0)
-# You need to create an API user in OpenCart admin panel:
-# System -> Users -> API -> Add New
-# Then get the Username and Key (not token!)
-OPENCART_API_USERNAME = os.getenv("OPENCART_API_USERNAME", "")
-OPENCART_API_KEY = os.getenv("OPENCART_API_KEY", "")
+    # OpenCart
+    OPENCART_URL: str = os.getenv("OPENCART_URL", "https://wifiobd.ru")
+    OPENCART_API_USERNAME: str = os.getenv("OPENCART_API_USERNAME", "")
+    OPENCART_API_KEY: str = os.getenv("OPENCART_API_KEY", "")
 
-# OpenCart Database (read-only access)
-OPENCART_DB_HOST = os.getenv("OPENCART_DB_HOST", "localhost")
-OPENCART_DB_PORT = int(os.getenv("OPENCART_DB_PORT", "3306"))
-OPENCART_DB_NAME = os.getenv("OPENCART_DB_NAME", "opencart")
-OPENCART_DB_USER = os.getenv("OPENCART_DB_USER", "")
-OPENCART_DB_PASSWORD = os.getenv("OPENCART_DB_PASSWORD", "")
+    # OpenCart Database (Read-Only)
+    OPENCART_DB_HOST: str = os.getenv("OPENCART_DB_HOST", "localhost")
+    OPENCART_DB_PORT: int = int(os.getenv("OPENCART_DB_PORT", "3306"))
+    OPENCART_DB_NAME: str = os.getenv("OPENCART_DB_NAME", "opencart")
+    OPENCART_DB_USER: str = os.getenv("OPENCART_DB_USER", "")
+    OPENCART_DB_PASSWORD: str = os.getenv("OPENCART_DB_PASSWORD", "")
 
-# Bot Database (PostgreSQL)
-DB_HOST = os.getenv("DB_HOST", "postgres")
-DB_PORT = int(os.getenv("DB_PORT", "5432"))
-DB_NAME = os.getenv("DB_NAME", "wifiobd_bot_db")
-DB_USER = os.getenv("DB_USER", "wifiobd_bot")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+    # Bot Database (PostgreSQL)
+    DB_HOST: str = os.getenv("DB_HOST", "localhost")
+    DB_PORT: int = int(os.getenv("DB_PORT", "5432"))
+    DB_NAME: str = os.getenv("DB_NAME", "wifiobd_bot_db")
+    DB_USER: str = os.getenv("DB_USER", "wifiobd_bot")
+    DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
 
-# Database URLs
-DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-OPENCART_DB_URL = f"mysql+aiomysql://{OPENCART_DB_USER}:{OPENCART_DB_PASSWORD}@{OPENCART_DB_HOST}:{OPENCART_DB_PORT}/{OPENCART_DB_NAME}"
+    @property
+    def DATABASE_URL(self) -> str:
+        """PostgreSQL connection URL"""
+        return (
+            f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}"
+            f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        )
 
-# Redis
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-REDIS_DB = int(os.getenv("REDIS_DB", "0"))
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
+    # Redis
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
 
-# YooMoney
-YOOMONEY_TOKEN = os.getenv("YOOMONEY_TOKEN", "")
-YOOMONEY_WALLET = os.getenv("YOOMONEY_WALLET", "")
-YOOMONEY_CLIENT_ID = os.getenv("YOOMONEY_CLIENT_ID", "")
+    @property
+    def REDIS_URL(self) -> str:
+        """Redis connection URL"""
+        if self.REDIS_PASSWORD:
+            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
 
-# Application settings
-DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+    # YooKassa Payment
+    YOOKASSA_SHOP_ID: str = os.getenv("YOOKASSA_SHOP_ID", "")
+    YOOKASSA_SECRET_KEY: str = os.getenv("YOOKASSA_SECRET_KEY", "")
 
-# Cart settings
-CART_EXPIRE_DAYS = int(os.getenv("CART_EXPIRE_DAYS", "7"))
+    # Application
+    DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
-# Pagination
-PRODUCTS_PER_PAGE = int(os.getenv("PRODUCTS_PER_PAGE", "10"))
-CATEGORIES_PER_PAGE = int(os.getenv("CATEGORIES_PER_PAGE", "10"))
+    # Cart Settings
+    CART_EXPIRE_DAYS: int = int(os.getenv("CART_EXPIRE_DAYS", "7"))
 
-# Throttling (anti-spam)
-THROTTLE_TIME = float(os.getenv("THROTTLE_TIME", "0.5"))  # seconds
+    # Pagination
+    PRODUCTS_PER_PAGE: int = int(os.getenv("PRODUCTS_PER_PAGE", "10"))
+    CATEGORIES_PER_PAGE: int = int(os.getenv("CATEGORIES_PER_PAGE", "10"))
 
-# Logging
-LOGS_DIR = BASE_DIR / "logs"
-LOGS_DIR.mkdir(exist_ok=True)
+    # Throttling
+    THROTTLE_TIME: float = float(os.getenv("THROTTLE_TIME", "0.5"))
+
+    def validate(self) -> bool:
+        """Validate required settings"""
+        required = [
+            (self.VK_TOKEN, "VK_TOKEN"),
+            (self.VK_GROUP_ID, "VK_GROUP_ID"),
+            (self.DB_PASSWORD, "DB_PASSWORD"),
+            (self.OPENCART_DB_HOST, "OPENCART_DB_HOST"),
+            (self.YOOKASSA_SHOP_ID, "YOOKASSA_SHOP_ID"),
+            (self.YOOKASSA_SECRET_KEY, "YOOKASSA_SECRET_KEY"),
+        ]
+
+        missing = [name for value, name in required if not value]
+        
+        if missing:
+            raise ValueError(f"Missing required settings: {', '.join(missing)}")
+        
+        return True
+
+
+# Create global settings instance
+settings = Settings()
+
+# Validate on import
+if not os.getenv("SKIP_VALIDATION"):
+    settings.validate()
