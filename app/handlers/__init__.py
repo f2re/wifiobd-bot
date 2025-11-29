@@ -1,4 +1,6 @@
-"""Handlers module"""
+"""VK Bot Handlers module"""
+from vkbottle.bot import Bot
+
 from . import start
 from . import catalog
 from . import cart
@@ -7,13 +9,14 @@ from . import payment
 from . import admin
 from . import support
 
-# Export all routers
-routers = [
-    start.router,
-    catalog.router,
-    cart.router,
-    checkout.router,
-    payment.router,
-    admin.router,
-    support.router,
-]
+
+def register_handlers(bot: Bot):
+    """Register all bot handlers"""
+    # Register handlers for each module
+    start.register_handlers(bot)
+    catalog.register_handlers(bot)
+    cart.register_handlers(bot)
+    checkout.register_handlers(bot)
+    payment.register_handlers(bot)
+    admin.register_handlers(bot)
+    support.register_handlers(bot)
