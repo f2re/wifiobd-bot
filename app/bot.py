@@ -1,24 +1,25 @@
 """
-Bot instance initialization
+VK Bot instance initialization
 """
-from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
+from vkbottle.bot import Bot
+from vkbottle import API, LoopWrapper
+from vkbottle.dispatch.labeler import BotLabeler
 
 from config import settings
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Initialize VK API
+api = API(token=settings.VK_TOKEN)
+
 # Initialize bot
 bot = Bot(
-    token=settings.BOT_TOKEN,
-    default=DefaultBotProperties(
-        parse_mode=ParseMode.HTML
-    )
+    token=settings.VK_TOKEN,
+    loop_wrapper=LoopWrapper()
 )
 
-# Initialize dispatcher
-dp = Dispatcher()
+# Initialize labeler for handlers
+labeler = BotLabeler()
 
-logger.info("Bot and Dispatcher initialized")
+logger.info("VK Bot and API initialized")
