@@ -1,37 +1,25 @@
 version: '3.8'
 
 services:
+  # VK Bot
   bot:
     build: .
-    container_name: wifiobd_bot
+    container_name: wifiobd-vk-bot
     restart: unless-stopped
-    env_file: .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
     volumes:
-      - ./app:/app/app
-      - ./config:/app/config
       - ./logs:/app/logs
     networks:
-      - bot_network
-    depends_on:
-      - redis
-      - postgres
-    command: python -m app.main
+      - wifiobd-network
 
-  redis:
-    image: redis:7-alpine
-    container_name: wifiobd_redis
-    restart: unless-stopped
-    volumes:
-      - redis_data:/data
-    networks:
-      - bot_network
-    command: redis-server --appendonly yes
-
+  # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
-    container_name: wifiobd_postgres
+    container_name: wifiobd-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME}
@@ -40,14 +28,33 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - bot_network
-    ports:
-      - "5432:5432"
+      - wifiobd-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-networks:
-  bot_network:
-    driver: bridge
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: wifiobd-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - wifiobd-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
-  redis_data:
   postgres_data:
+  redis_data:
+
+networks:
+  wifiobd-network:
+    driver: bridge
