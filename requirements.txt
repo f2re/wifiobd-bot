@@ -1,5 +1,6 @@
-# Telegram Bot Framework
-aiogram==3.13.1
+# VK Bot Framework
+vkbottle==4.3.12
+vk-api==11.9.9
 aiohttp==3.10.5
 
 # Database
@@ -12,8 +13,8 @@ alembic==1.13.3
 redis==5.2.0
 aioredis==2.0.1
 
-# YooMoney (requires requests)
-yoomoney==0.1.2
+# YooKassa (updated from YooMoney)
+yookassa==3.0.0
 requests==2.31.0
 
 # MySQL/MariaDB for OpenCart DB
