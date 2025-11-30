@@ -1,440 +1,229 @@
 """
-Catalog browsing handlers (categories and products)
+Catalog browsing handlers for VK bot (categories and products)
 """
-from aiogram import Router, F
-from aiogram.types import CallbackQuery, InputMediaPhoto
-from aiogram.exceptions import TelegramBadRequest
+from vkbottle.bot import Bot, Message
+from vkbottle import Callback
 
 from app.services.opencart import opencart_service
-from app.keyboards.inline import (
-    categories_keyboard,
-    products_keyboard,
-    product_card_keyboard,
-    back_to_main_menu_keyboard
-)
+from app.services.vk_service import vk_photo_service
+from app.keyboards.inline import VKKeyboards
 from app.utils.logger import get_logger
 from app.utils.formatting import format_product_card
 from config import settings
 
 logger = get_logger(__name__)
 
-router = Router()
 
+def register_handlers(bot: Bot):
+    """Register catalog handlers"""
 
-@router.callback_query(F.data == "catalog")
-async def show_catalog(callback: CallbackQuery):
-    """Show catalog - auto-redirect to 'Магазин' category"""
-    try:
-        categories = await opencart_service.get_root_categories()
+    @bot.on.message(text=["🛍 Каталог", "🛍 каталог", "Каталог", "каталог"])
+    async def show_catalog_text(message: Message):
+        """Show catalog from text button"""
+        try:
+            categories = await opencart_service.get_root_categories()
 
-        if not categories:
-            # Check if current message has photo
-            has_photo = callback.message.photo is not None and len(callback.message.photo) > 0
-
-            text = "📂 <b>Каталог пуст</b>\n\nВ данный момент категории не доступны."
-            keyboard = back_to_main_menu_keyboard()
-
-            if has_photo:
-                await callback.message.delete()
-                await callback.message.answer(
-                    text,
-                    reply_markup=keyboard,
-                    parse_mode="HTML"
+            if not categories:
+                await message.answer(
+                    "📂 <b>Каталог пуст</b>\n\nВ данный момент категории не доступны.",
+                    keyboard=VKKeyboards.main_menu()
                 )
-            else:
-                try:
-                    await callback.message.edit_text(
-                        text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-                except TelegramBadRequest as e:
-                    if "message is not modified" in str(e):
-                        pass
-                    else:
-                        raise
-            await callback.answer()
-            return
+                return
 
-        # Find "Магазин" category by name
-        shop_category = None
-        for category in categories:
-            if category['name'].lower() == 'магазин':
-                shop_category = category
-                break
+            # Find "Магазин" category
+            shop_category = None
+            for category in categories:
+                if category['name'].lower() == 'магазин':
+                    shop_category = category
+                    break
 
-        # If "Магазин" category found, redirect to it directly
-        if shop_category:
-            # Get subcategories of "Магазин"
-            shop_category_id = shop_category['category_id']
-            subcategories = await opencart_service.get_subcategories(shop_category_id)
+            if shop_category:
+                # Get subcategories of "Магазин"
+                subcategories = await opencart_service.get_subcategories(shop_category['category_id'])
 
-            # Check if current message has photo
-            has_photo = callback.message.photo is not None and len(callback.message.photo) > 0
-
-            if subcategories:
-                # Show subcategories of "Магазин"
-                text = "📂 <b>Каталог товаров</b>\n\nВыберите категорию:"
-                keyboard = categories_keyboard(subcategories, 0)  # parent_id=0 to go back to main menu
-
-                if has_photo:
-                    await callback.message.delete()
-                    await callback.message.answer(
-                        text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
+                if subcategories:
+                    await message.answer(
+                        "📂 <b>Каталог товаров</b>\n\nВыберите категорию:",
+                        keyboard=VKKeyboards.catalog_categories(subcategories)
                     )
                 else:
-                    try:
-                        await callback.message.edit_text(
-                            text,
-                            reply_markup=keyboard,
-                            parse_mode="HTML"
+                    # Show products from "Магазин"
+                    products = await opencart_service.get_products_by_category(
+                        shop_category['category_id'],
+                        limit=settings.PRODUCTS_PER_PAGE,
+                        offset=0
+                    )
+
+                    if products:
+                        # Format products list
+                        text = "📂 <b>Каталог товаров</b>\n\nВыберите товар:\n\n"
+                        for product in products:
+                            text += f"• {product['name']} - {product['price']}₽\n"
+
+                        # For VK, we'll use callback buttons for products
+                        await message.answer(text, keyboard=VKKeyboards.back_button('main_menu'))
+                    else:
+                        await message.answer(
+                            "📂 <b>Каталог</b>\n\n😔 В данный момент товары не доступны.",
+                            keyboard=VKKeyboards.main_menu()
                         )
-                    except TelegramBadRequest as e:
-                        if "message is not modified" in str(e):
-                            pass
-                        else:
-                            raise
             else:
-                # No subcategories, show products from "Магазин"
+                # Show all root categories
+                await message.answer(
+                    "📂 <b>Каталог товаров</b>\n\nВыберите категорию:",
+                    keyboard=VKKeyboards.catalog_categories(categories)
+                )
+
+        except Exception as e:
+            logger.error(f"Error showing catalog: {e}", exc_info=True)
+            await message.answer(
+                "❌ Произошла ошибка при загрузке каталога",
+                keyboard=VKKeyboards.main_menu()
+            )
+
+    @bot.on.message(payload={'action': 'catalog'})
+    async def show_catalog_callback(message: Message):
+        """Show catalog from callback"""
+        await show_catalog_text(message)
+
+    @bot.on.message(payload={'action': 'category'})
+    async def show_category(message: Message):
+        """Show category contents"""
+        try:
+            payload = message.get_payload_json()
+            category_id = payload.get('id')
+
+            if not category_id:
+                await message.answer("❌ Ошибка: категория не указана")
+                return
+
+            # Get category details
+            category = await opencart_service.get_category_details(category_id)
+
+            if not category:
+                await message.answer("❌ Категория не найдена")
+                return
+
+            # Check for subcategories
+            subcategories = await opencart_service.get_subcategories(category_id)
+
+            if subcategories:
+                # Show subcategories
+                await message.answer(
+                    f"📁 <b>{category['name']}</b>\n\nВыберите подкатегорию:",
+                    keyboard=VKKeyboards.catalog_categories(subcategories)
+                )
+            else:
+                # Show products
                 products = await opencart_service.get_products_by_category(
-                    shop_category_id,
+                    category_id,
                     limit=settings.PRODUCTS_PER_PAGE,
                     offset=0
                 )
 
-                if products:
-                    text = "📂 <b>Каталог товаров</b>\n\nВыберите товар:"
-                    has_next = len(products) == settings.PRODUCTS_PER_PAGE
-                    keyboard = products_keyboard(products, shop_category_id, 0, has_next, 0)
+                if not products:
+                    await message.answer(
+                        f"📁 <b>{category['name']}</b>\n\n😔 В этой категории пока нет товаров.",
+                        keyboard=VKKeyboards.back_button('catalog')
+                    )
+                else:
+                    # Format products list
+                    text = f"📁 <b>{category['name']}</b>\n\nТовары:\n\n"
+                    for i, product in enumerate(products, 1):
+                        text += f"{i}. {product['name']}\n💰 {product['price']}₽\n\n"
 
-                    if has_photo:
-                        await callback.message.delete()
-                        await callback.message.answer(
-                            text,
-                            reply_markup=keyboard,
-                            parse_mode="HTML"
-                        )
-                    else:
-                        try:
-                            await callback.message.edit_text(
-                                text,
-                                reply_markup=keyboard,
-                                parse_mode="HTML"
+                    # Create keyboard with product buttons
+                    from vkbottle import Keyboard, KeyboardButtonColor, Callback as VKCallback
+                    keyboard = Keyboard(inline=True)
+
+                    for i, product in enumerate(products[:10]):  # Limit to 10 products per page
+                        keyboard.add(
+                            VKCallback(
+                                label=f"{i+1}. {product['name'][:20]}...",
+                                payload={'action': 'product', 'id': product['product_id']}
                             )
-                        except TelegramBadRequest as e:
-                            if "message is not modified" in str(e):
-                                pass
-                            else:
-                                raise
-                else:
-                    # No products either
-                    text = "📂 <b>Каталог</b>\n\n😔 В данный момент товары не доступны."
-                    keyboard = back_to_main_menu_keyboard()
-
-                    if has_photo:
-                        await callback.message.delete()
-                        await callback.message.answer(
-                            text,
-                            reply_markup=keyboard,
-                            parse_mode="HTML"
                         )
-                    else:
-                        try:
-                            await callback.message.edit_text(
-                                text,
-                                reply_markup=keyboard,
-                                parse_mode="HTML"
-                            )
-                        except TelegramBadRequest as e:
-                            if "message is not modified" in str(e):
-                                pass
-                            else:
-                                raise
-        else:
-            # "Магазин" category not found, show all root categories as fallback
-            has_photo = callback.message.photo is not None and len(callback.message.photo) > 0
+                        if (i + 1) % 2 == 0:
+                            keyboard.row()
 
-            text = "📂 <b>Каталог товаров</b>\n\nВыберите категорию:"
-            keyboard = categories_keyboard(categories)
+                    keyboard.row()
+                    keyboard.add(VKCallback(label="🔙 Назад", payload={'action': 'catalog'}))
 
-            if has_photo:
-                await callback.message.delete()
-                await callback.message.answer(
-                    text,
-                    reply_markup=keyboard,
-                    parse_mode="HTML"
-                )
-            else:
-                try:
-                    await callback.message.edit_text(
-                        text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-                except TelegramBadRequest as e:
-                    if "message is not modified" in str(e):
-                        pass
-                    else:
-                        raise
+                    await message.answer(text, keyboard=keyboard.get_json())
 
-        await callback.answer()
+        except Exception as e:
+            logger.error(f"Error showing category: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка при загрузке категории")
 
-    except Exception as e:
-        logger.error(f"Error showing catalog: {e}")
-        await callback.answer("Произошла ошибка при загрузке каталога", show_alert=True)
-
-
-@router.callback_query(F.data.startswith("cat:"))
-async def show_category(callback: CallbackQuery):
-    """Show category contents (subcategories or products)"""
-    try:
-        category_id = int(callback.data.split(":")[1])
-
-        # Get category details
-        category = await opencart_service.get_category_details(category_id)
-
-        if not category:
-            await callback.answer("Категория не найдена", show_alert=True)
-            return
-
-        # Check if current message has photo
-        has_photo = callback.message.photo is not None and len(callback.message.photo) > 0
-
-        # Check for subcategories first
-        subcategories = await opencart_service.get_subcategories(category_id)
-
-        if subcategories:
-            # Show subcategories
-            text = f"📁 <b>{category['name']}</b>\n\nВыберите подкатегорию:"
-            keyboard = categories_keyboard(subcategories, category['parent_id'])
-
-            if has_photo:
-                # Delete photo message and send text
-                await callback.message.delete()
-                await callback.message.answer(
-                    text,
-                    reply_markup=keyboard,
-                    parse_mode="HTML"
-                )
-            else:
-                try:
-                    await callback.message.edit_text(
-                        text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-                except TelegramBadRequest as e:
-                    if "message is not modified" in str(e):
-                        pass
-                    else:
-                        raise
-        else:
-            # Show products
-            products = await opencart_service.get_products_by_category(
-                category_id,
-                limit=settings.PRODUCTS_PER_PAGE,
-                offset=0
-            )
-
-            if not products:
-                text = f"📁 <b>{category['name']}</b>\n\n😔 В этой категории пока нет товаров."
-                keyboard = categories_keyboard([], category['parent_id'])
-
-                if has_photo:
-                    await callback.message.delete()
-                    await callback.message.answer(
-                        text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-                else:
-                    try:
-                        await callback.message.edit_text(
-                            text,
-                            reply_markup=keyboard,
-                            parse_mode="HTML"
-                        )
-                    except TelegramBadRequest as e:
-                        if "message is not modified" in str(e):
-                            pass
-                        else:
-                            raise
-            else:
-                text = f"📁 <b>{category['name']}</b>\n\nВыберите товар:"
-                has_next = len(products) == settings.PRODUCTS_PER_PAGE
-                keyboard = products_keyboard(products, category_id, 0, has_next, category['parent_id'])
-
-                if has_photo:
-                    await callback.message.delete()
-                    await callback.message.answer(
-                        text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-                else:
-                    try:
-                        await callback.message.edit_text(
-                            text,
-                            reply_markup=keyboard,
-                            parse_mode="HTML"
-                        )
-                    except TelegramBadRequest as e:
-                        if "message is not modified" in str(e):
-                            pass
-                        else:
-                            raise
-
-        await callback.answer()
-
-    except Exception as e:
-        logger.error(f"Error showing category: {e}")
-        await callback.answer("Произошла ошибка при загрузке категории", show_alert=True)
-
-
-@router.callback_query(F.data.startswith("catpage:"))
-async def show_category_page(callback: CallbackQuery):
-    """Show specific page of products in category"""
-    try:
-        parts = callback.data.split(":")
-        category_id = int(parts[1])
-        page = int(parts[2])
-
-        # Get category details
-        category = await opencart_service.get_category_details(category_id)
-
-        if not category:
-            await callback.answer("Категория не найдена", show_alert=True)
-            return
-
-        # Get products for this page
-        offset = page * settings.PRODUCTS_PER_PAGE
-        products = await opencart_service.get_products_by_category(
-            category_id,
-            limit=settings.PRODUCTS_PER_PAGE,
-            offset=offset
-        )
-
-        if not products:
-            await callback.answer("Больше товаров нет", show_alert=True)
-            return
-
-        text = f"📁 <b>{category['name']}</b>\n\nВыберите товар:"
-        has_next = len(products) == settings.PRODUCTS_PER_PAGE
-
+    @bot.on.message(payload={'action': 'product'})
+    async def show_product(message: Message):
+        """Show product details"""
         try:
-            await callback.message.edit_text(
-                text,
-                reply_markup=products_keyboard(products, category_id, page, has_next, category['parent_id']),
-                parse_mode="HTML"
+            payload = message.get_payload_json()
+            product_id = payload.get('id')
+
+            if not product_id:
+                await message.answer("❌ Ошибка: товар не указан")
+                return
+
+            # Get product details
+            product = await opencart_service.get_product_details(product_id)
+
+            if not product:
+                await message.answer("❌ Товар не найден")
+                return
+
+            # Format product card
+            product_url = f"{settings.OPENCART_URL}/index.php?route=product/product&product_id={product_id}"
+            text = format_product_card(product, product_url=product_url)
+
+            # Get product image
+            image_attachment = None
+            if product.get('image'):
+                image_url = f"{settings.OPENCART_URL}/image/{product['image']}"
+                try:
+                    # Upload photo to VK
+                    image_attachment = await vk_photo_service.upload_photo(image_url)
+                except Exception as img_error:
+                    logger.warning(f"Failed to upload product image: {img_error}")
+
+            # Check if product is in stock
+            in_stock = product.get('in_stock', False)
+
+            # Create keyboard
+            keyboard_json = VKKeyboards.product_actions(
+                product_id,
+                in_cart=False  # TODO: check if product is in cart
             )
-        except TelegramBadRequest as e:
-            if "message is not modified" in str(e):
-                pass
+
+            # Send message with or without photo
+            if image_attachment:
+                await message.answer(
+                    message=text,
+                    attachment=image_attachment,
+                    keyboard=keyboard_json
+                )
             else:
-                raise
+                await message.answer(
+                    message=text,
+                    keyboard=keyboard_json
+                )
 
-        await callback.answer()
+        except Exception as e:
+            logger.error(f"Error showing product: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка при загрузке товара")
 
-    except Exception as e:
-        logger.error(f"Error showing category page: {e}")
-        await callback.answer("Произошла ошибка при загрузке страницы", show_alert=True)
-
-
-@router.callback_query(F.data.startswith("prod:"))
-async def show_product(callback: CallbackQuery):
-    """Show product details"""
-    try:
-        product_id = int(callback.data.split(":")[1])
-
-        # Get product details
-        product = await opencart_service.get_product_details(product_id)
-
-        if not product:
-            await callback.answer("Товар не найден", show_alert=True)
-            return
-
-        # Generate product URL for OpenCart
-        product_url = f"{settings.OPENCART_URL}/index.php?route=product/product&product_id={product_id}"
-
-        # Format product card with URL for truncated descriptions
-        text = format_product_card(product, product_url=product_url)
-
-        # Prepare keyboard with product URL button
-        keyboard = product_card_keyboard(
-            product_id,
-            product.get('category_id', 0),
-            product.get('in_stock', False),
-            product_url=product_url
+    @bot.on.message(payload={'action': 'back_to_menu'})
+    async def back_to_menu(message: Message):
+        """Return to main menu"""
+        await message.answer(
+            "Главное меню:",
+            keyboard=VKKeyboards.main_menu()
         )
 
-        # Check if current message has photo
-        has_photo = callback.message.photo is not None and len(callback.message.photo) > 0
+    @bot.on.message(payload={'action': 'back_to_category'})
+    async def back_to_category(message: Message):
+        """Go back to category list"""
+        await show_catalog_text(message)
 
-        # Try to send with image if available
-        if product.get('image'):
-            image_url = f"{settings.OPENCART_URL}/image/{product['image']}"
-
-            try:
-                if has_photo:
-                    # Edit existing photo message
-                    await callback.message.edit_media(
-                        media=InputMediaPhoto(media=image_url, caption=text, parse_mode="HTML"),
-                        reply_markup=keyboard
-                    )
-                else:
-                    # Delete text message and send photo
-                    await callback.message.delete()
-                    await callback.message.answer_photo(
-                        photo=image_url,
-                        caption=text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-            except Exception as img_error:
-                logger.warning(f"Failed to send product image: {img_error}")
-                # Fallback to text-only
-                try:
-                    await callback.message.edit_text(
-                        text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-                except TelegramBadRequest:
-                    # Can't edit, send new message
-                    await callback.message.delete()
-                    await callback.message.answer(
-                        text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-        else:
-            # No image, send text only
-            try:
-                if has_photo:
-                    # Delete photo message and send text
-                    await callback.message.delete()
-                    await callback.message.answer(
-                        text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-                else:
-                    # Edit existing text message
-                    await callback.message.edit_text(
-                        text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-            except TelegramBadRequest as e:
-                if "message is not modified" in str(e):
-                    pass
-                else:
-                    raise
-
-        await callback.answer()
-
-    except Exception as e:
-        logger.error(f"Error showing product: {e}")
-        await callback.answer("Произошла ошибка при загрузке товара", show_alert=True)
+    logger.info("Catalog handlers registered")

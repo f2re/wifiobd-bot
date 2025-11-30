@@ -1,254 +1,202 @@
 """
-Shopping cart handlers
+Shopping cart handlers for VK bot
 """
-from aiogram import Router, F
-from aiogram.types import CallbackQuery
-from aiogram.exceptions import TelegramBadRequest
+from vkbottle.bot import Bot, Message
 
 from app.services.cart import cart_service
 from app.services.opencart import opencart_service
-from app.keyboards.inline import cart_keyboard, back_to_main_menu_keyboard
+from app.keyboards.inline import VKKeyboards
 from app.utils.logger import get_logger
 from app.utils.formatting import format_cart_summary
 
 logger = get_logger(__name__)
 
-router = Router()
 
+def register_handlers(bot: Bot):
+    """Register cart handlers"""
 
-@router.callback_query(F.data.startswith("addcart:"))
-async def add_to_cart(callback: CallbackQuery):
-    """Add product to cart"""
-    try:
-        product_id = int(callback.data.split(":")[1])
-        user_id = callback.from_user.id
+    @bot.on.message(payload={'action': 'add_to_cart'})
+    async def add_to_cart(message: Message):
+        """Add product to cart"""
+        try:
+            payload = message.get_payload_json()
+            product_id = payload.get('product_id')
 
-        # Get product details to verify it exists and is in stock
-        product = await opencart_service.get_product_details(product_id)
+            if not product_id:
+                await message.answer("❌ Ошибка: товар не указан")
+                return
 
-        if not product:
-            await callback.answer("❌ Товар не найден", show_alert=True)
-            return
+            user_id = message.from_id
 
-        if not product.get('in_stock', False):
-            await callback.answer("❌ Товар отсутствует на складе", show_alert=True)
-            return
+            # Get product details
+            product = await opencart_service.get_product_details(product_id)
 
-        # Add to cart
-        success = await cart_service.add_item(user_id, product_id, quantity=1)
+            if not product:
+                await message.answer("❌ Товар не найден")
+                return
 
-        if success:
-            # Get cart count
-            count = await cart_service.get_item_count(user_id)
-            await callback.answer(
-                f"✅ Товар добавлен в корзину!\n🛒 Товаров в корзине: {count}",
-                show_alert=False
-            )
-        else:
-            await callback.answer("❌ Не удалось добавить товар в корзину", show_alert=True)
+            if not product.get('in_stock', False):
+                await message.answer("❌ Товар отсутствует на складе")
+                return
 
-    except Exception as e:
-        logger.error(f"Error adding to cart: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
+            # Add to cart
+            success = await cart_service.add_item(user_id, product_id, quantity=1)
 
-
-@router.callback_query(F.data == "cart")
-async def show_cart(callback: CallbackQuery):
-    """Show shopping cart"""
-    try:
-        user_id = callback.from_user.id
-
-        # Get cart
-        cart = await cart_service.get_cart(user_id)
-
-        if not cart["items"]:
-            text = "🛒 <b>Ваша корзина пуста</b>\n\nДобавьте товары из каталога."
-            keyboard = back_to_main_menu_keyboard()
-        else:
-            text = format_cart_summary(cart)
-            keyboard = cart_keyboard(has_items=True)
-
-        # Check if current message has photo
-        has_photo = callback.message.photo is not None and len(callback.message.photo) > 0
-
-        if has_photo:
-            # Delete photo message and send text
-            await callback.message.delete()
-            await callback.message.answer(
-                text,
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
-        else:
-            try:
-                await callback.message.edit_text(
-                    text,
-                    reply_markup=keyboard,
-                    parse_mode="HTML"
+            if success:
+                count = await cart_service.get_item_count(user_id)
+                await message.answer(
+                    f"✅ Товар добавлен в корзину!\n🛒 Товаров в корзине: {count}",
+                    keyboard=VKKeyboards.main_menu()
                 )
-            except TelegramBadRequest as e:
-                if "message is not modified" in str(e):
-                    pass
-                else:
-                    raise
+            else:
+                await message.answer("❌ Не удалось добавить товар в корзину")
 
-        await callback.answer()
+        except Exception as e:
+            logger.error(f"Error adding to cart: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка")
 
-    except Exception as e:
-        logger.error(f"Error showing cart: {e}")
-        await callback.answer("Произошла ошибка при загрузке корзины", show_alert=True)
+    @bot.on.message(text=["🛒 Корзина", "🛒 корзина", "Корзина", "корзина"])
+    async def show_cart_text(message: Message):
+        """Show shopping cart from text button"""
+        await show_cart_handler(message)
 
+    @bot.on.message(payload={'action': 'cart'})
+    async def show_cart_callback(message: Message):
+        """Show shopping cart from callback"""
+        await show_cart_handler(message)
 
-@router.callback_query(F.data.startswith("cart_inc:"))
-async def cart_increase_quantity(callback: CallbackQuery):
-    """Increase product quantity in cart"""
-    try:
-        product_id = int(callback.data.split(":")[1])
-        user_id = callback.from_user.id
+    async def show_cart_handler(message: Message):
+        """Show shopping cart"""
+        try:
+            user_id = message.from_id
 
-        # Get current cart
-        cart = await cart_service.get_cart(user_id)
+            # Get cart
+            cart = await cart_service.get_cart(user_id)
 
-        # Find the item
-        current_qty = 0
-        for item in cart["items"]:
-            if item["product_id"] == product_id:
-                current_qty = item["quantity"]
-                break
+            if not cart["items"]:
+                await message.answer(
+                    "🛒 <b>Ваша корзина пуста</b>\n\nДобавьте товары из каталога.",
+                    keyboard=VKKeyboards.main_menu()
+                )
+            else:
+                text = format_cart_summary(cart)
+                keyboard = VKKeyboards.cart_actions(has_items=True)
+                await message.answer(text, keyboard=keyboard)
 
-        if current_qty == 0:
-            await callback.answer("Товар не найден в корзине", show_alert=True)
-            return
+        except Exception as e:
+            logger.error(f"Error showing cart: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка при загрузке корзины")
 
-        # Increase quantity
-        new_qty = current_qty + 1
-        await cart_service.update_quantity(user_id, product_id, new_qty)
+    @bot.on.message(payload={'action': 'remove_from_cart'})
+    async def remove_from_cart(message: Message):
+        """Remove item from cart"""
+        try:
+            payload = message.get_payload_json()
+            product_id = payload.get('product_id')
 
-        # Refresh cart display
-        cart = await cart_service.get_cart(user_id)
-        text = format_cart_summary(cart)
+            if not product_id:
+                await message.answer("❌ Ошибка: товар не указан")
+                return
 
-        await callback.message.edit_text(
-            text,
-            reply_markup=cart_keyboard(has_items=True),
-            parse_mode="HTML"
-        )
+            user_id = message.from_id
 
-        await callback.answer(f"✅ Количество увеличено: {new_qty}")
-
-    except Exception as e:
-        logger.error(f"Error increasing quantity: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
-
-
-@router.callback_query(F.data.startswith("cart_dec:"))
-async def cart_decrease_quantity(callback: CallbackQuery):
-    """Decrease product quantity in cart"""
-    try:
-        product_id = int(callback.data.split(":")[1])
-        user_id = callback.from_user.id
-
-        # Get current cart
-        cart = await cart_service.get_cart(user_id)
-
-        # Find the item
-        current_qty = 0
-        for item in cart["items"]:
-            if item["product_id"] == product_id:
-                current_qty = item["quantity"]
-                break
-
-        if current_qty == 0:
-            await callback.answer("Товар не найден в корзине", show_alert=True)
-            return
-
-        # Decrease quantity
-        new_qty = current_qty - 1
-
-        if new_qty <= 0:
             # Remove from cart
-            await cart_service.remove_item(user_id, product_id)
-            await callback.answer("🗑 Товар удален из корзины")
-        else:
-            await cart_service.update_quantity(user_id, product_id, new_qty)
-            await callback.answer(f"✅ Количество уменьшено: {new_qty}")
+            success = await cart_service.remove_item(user_id, product_id)
 
-        # Refresh cart display
-        cart = await cart_service.get_cart(user_id)
+            if success:
+                await message.answer("🗑 Товар удален из корзины")
 
-        if not cart["items"]:
-            text = "🛒 <b>Ваша корзина пуста</b>\n\nДобавьте товары из каталога."
-            keyboard = back_to_main_menu_keyboard()
-        else:
-            text = format_cart_summary(cart)
-            keyboard = cart_keyboard(has_items=True)
+                # Show updated cart
+                cart = await cart_service.get_cart(user_id)
 
-        await callback.message.edit_text(
-            text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
+                if not cart["items"]:
+                    await message.answer(
+                        "🛒 <b>Ваша корзина пуста</b>\n\nДобавьте товары из каталога.",
+                        keyboard=VKKeyboards.main_menu()
+                    )
+                else:
+                    text = format_cart_summary(cart)
+                    await message.answer(text, keyboard=VKKeyboards.cart_actions(has_items=True))
+            else:
+                await message.answer("❌ Товар не найден в корзине")
 
-    except Exception as e:
-        logger.error(f"Error decreasing quantity: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
+        except Exception as e:
+            logger.error(f"Error removing from cart: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка")
 
+    @bot.on.message(payload={'action': 'clear_cart'})
+    async def clear_cart(message: Message):
+        """Clear entire cart"""
+        try:
+            user_id = message.from_id
 
-@router.callback_query(F.data.startswith("cart_remove:"))
-async def cart_remove_item(callback: CallbackQuery):
-    """Remove item from cart"""
-    try:
-        product_id = int(callback.data.split(":")[1])
-        user_id = callback.from_user.id
+            # Clear cart
+            await cart_service.clear_cart(user_id)
 
-        # Remove from cart
-        success = await cart_service.remove_item(user_id, product_id)
+            await message.answer(
+                "🛒 <b>Корзина очищена</b>\n\nВсе товары удалены из корзины.",
+                keyboard=VKKeyboards.main_menu()
+            )
 
-        if success:
-            await callback.answer("🗑 Товар удален из корзины")
-        else:
-            await callback.answer("Товар не найден в корзине", show_alert=True)
+        except Exception as e:
+            logger.error(f"Error clearing cart: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка")
 
-        # Refresh cart display
-        cart = await cart_service.get_cart(user_id)
+    @bot.on.message(payload={'action': 'back_to_cart'})
+    async def back_to_cart(message: Message):
+        """Return to cart"""
+        await show_cart_handler(message)
 
-        if not cart["items"]:
-            text = "🛒 <b>Ваша корзина пуста</b>\n\nДобавьте товары из каталога."
-            keyboard = back_to_main_menu_keyboard()
-        else:
-            text = format_cart_summary(cart)
-            keyboard = cart_keyboard(has_items=True)
+    @bot.on.message(text=["📦 Мои заказы", "📦 мои заказы", "Заказы", "заказы"])
+    async def show_my_orders(message: Message):
+        """Show user's orders"""
+        try:
+            from app.database import get_db
+            from app.services.order import order_service
+            from app.utils.formatting import format_price, format_date
 
-        await callback.message.edit_text(
-            text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
+            user_id = message.from_id
 
-    except Exception as e:
-        logger.error(f"Error removing item: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
+            # Get user's orders
+            async with get_db() as db:
+                orders = await order_service.get_user_orders(db, user_id, limit=10)
 
+            if not orders:
+                await message.answer(
+                    "📦 <b>История заказов</b>\n\nУ вас пока нет заказов.",
+                    keyboard=VKKeyboards.main_menu()
+                )
+                return
 
-@router.callback_query(F.data == "clear_cart")
-async def clear_cart(callback: CallbackQuery):
-    """Clear entire cart"""
-    try:
-        user_id = callback.from_user.id
+            # Build orders list
+            text = "📦 <b>Ваши заказы:</b>\n\n"
 
-        # Clear cart
-        await cart_service.clear_cart(user_id)
+            for order in orders:
+                status_emoji = {
+                    "pending": "⏳",
+                    "paid": "✅",
+                    "cancelled": "❌",
+                    "completed": "🎉"
+                }.get(order.status, "❓")
+                status_text = {
+                    "pending": "Ожидает оплаты",
+                    "paid": "Оплачен",
+                    "cancelled": "Отменен",
+                    "completed": "Выполнен"
+                }.get(order.status, "Неизвестно")
 
-        text = "🛒 <b>Корзина очищена</b>\n\nВсе товары удалены из корзины."
+                text += f"""
+{status_emoji} <b>Заказ #{order.id}</b>
+💰 Сумма: {format_price(order.amount)}
+📅 Дата: {format_date(order.created_at)}
+📊 Статус: {status_text}
+━━━━━━━━━━━━
+"""
 
-        await callback.message.edit_text(
-            text,
-            reply_markup=back_to_main_menu_keyboard(),
-            parse_mode="HTML"
-        )
+            await message.answer(text, keyboard=VKKeyboards.main_menu())
 
-        await callback.answer("🗑 Корзина очищена")
+        except Exception as e:
+            logger.error(f"Error showing orders: {e}", exc_info=True)
+            await message.answer("❌ Произошла ошибка")
 
-    except Exception as e:
-        logger.error(f"Error clearing cart: {e}")
-        await callback.answer("Произошла ошибка", show_alert=True)
+    logger.info("Cart handlers registered")
